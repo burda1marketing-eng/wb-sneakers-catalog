@@ -38,6 +38,11 @@ type SupplierSummary = Omit<Supplier, "products"> & {
 };
 
 const PAGE_SIZE = 24;
+const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+function localHref(pathname: string) {
+  return `${PUBLIC_BASE_PATH}${pathname}`;
+}
 
 function normalize(value: string) {
   return value.toLocaleLowerCase("ru-RU").replace(/ё/g, "е").trim();
@@ -107,7 +112,7 @@ export default function CatalogClient({
     <div className="catalog-shell">
       <main className="catalog-main">
         <div className="topline">
-          <a className="wordmark" href="/" aria-label="Главная страница каталога">
+          <a className="wordmark" href={localHref("/")} aria-label="Главная страница каталога">
             <span className="wordmark-mark">↗</span>
             Каталог обуви
           </a>
@@ -245,7 +250,7 @@ export default function CatalogClient({
           {suppliers.map((item) => (
             <a
               className={`supplier-link ${item.slug === supplier.slug ? "active" : ""}`}
-              href={`/catalog/${item.slug}`}
+              href={localHref(`/catalog/${item.slug}/`)}
               aria-current={item.slug === supplier.slug ? "page" : undefined}
               key={item.slug}
             >
