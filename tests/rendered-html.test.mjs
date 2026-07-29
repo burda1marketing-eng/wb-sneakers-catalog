@@ -61,9 +61,11 @@ test("renders the shareable inventory report route", async () => {
   assert.match(await response.text(), /Загружаем сохранённую инвентаризацию/);
 });
 
-test("ships responsive navigation, compact details and camera inventory code", async () => {
-  const [component, styles] = await Promise.all([
+test("ships responsive catalog picker, repeatable inventory and defect photos", async () => {
+  const [component, report, api, styles] = await Promise.all([
     readFile(new URL("../app/CatalogClient.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/inventory/InventoryReportClient.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/inventories/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -74,11 +76,27 @@ test("ships responsive navigation, compact details and camera inventory code", a
   assert.match(component, /Сохранить инвентаризацию/);
   assert.match(component, /Выгрузить в Excel/);
   assert.match(component, /Посмотреть на сайте/);
+  assert.match(component, /Выбрать из общего каталога/);
+  assert.match(component, /Количество, шт\./);
+  assert.match(component, /Брак/);
+  assert.match(component, /capture="environment"/);
+  assert.match(component, /Из галереи/);
+  assert.match(component, /Создать новую/);
+  assert.match(component, /Сохранённые отчёты/);
+  assert.match(component, /defectPhotos\.length/);
   assert.match(component, /\.xlsx/);
   assert.doesNotMatch(component, /className="description"|className="modal-media"/);
+  assert.match(api, /INVENTORY_PHOTOS/);
+  assert.match(api, /CREATE TABLE IF NOT EXISTS inventories/);
+  assert.match(api, /photos\.filter/);
+  assert.match(report, /api\/inventories\?id=/);
+  assert.match(report, /report-defect-photos/);
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /supplier-mobile-switcher/);
   assert.match(styles, /inventory-saved-actions/);
+  assert.match(styles, /inventory-picker-grid/);
+  assert.match(styles, /defect-photo-grid/);
+  assert.match(styles, /inventory-history-list/);
   assert.match(styles, /report-item/);
   assert.match(styles, /repeat\(auto-fill, minmax/);
 });

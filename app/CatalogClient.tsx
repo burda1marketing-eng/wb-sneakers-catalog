@@ -1,8 +1,8 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IScannerControls } from "@zxing/browser";
-import { createInventoryShareToken } from "./inventory/share";
 
 type Size = {
   label: string;
@@ -49,16 +49,28 @@ type InventoryItem = {
   sizeRu: string;
   barcode: string;
   count: number;
+  defective: boolean;
+  defectPhotos: string[];
 };
 
 type SavedInventory = {
+  id: string;
   savedAt: string;
-  token: string;
   items: InventoryItem[];
+};
+
+type InventoryHistoryItem = {
+  id: string;
+  supplierSlug: string;
+  savedAt: string;
+  positionCount: number;
+  totalCount: number;
+  defectiveCount: number;
 };
 
 const PAGE_SIZE = 24;
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN ?? "";
 
 function localHref(pathname: string) {
   return `${PUBLIC_BASE_PATH}${pathname}`;
@@ -72,8 +84,47 @@ function inventoryStorageKey(supplierSlug: string) {
   return `wb-catalog-inventory:${supplierSlug}`;
 }
 
-function savedInventoryStorageKey(supplierSlug: string) {
-  return `wb-catalog-inventory-saved:${supplierSlug}`;
+function apiHref(pathname: string) {
+  return API_ORIGIN ? `${API_ORIGIN.replace(/\/$/, "")}${pathname}` : pathname;
+}
+
+function inventoryOwnerKey() {
+  const storageKey = "wb-catalog-inventory-owner";
+  const existing = window.localStorage.getItem(storageKey);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  window.localStorage.setItem(storageKey, created);
+  return created;
+}
+
+function formatInventoryDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+async function compressDefectPhoto(file: File) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не удалось прочитать фото"));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("Не удалось открыть фото"));
+    element.src = dataUrl;
+  });
+  const scale = Math.min(1, 1080 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Не удалось обработать фото");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.72);
 }
 
 export default function CatalogClient({
@@ -94,9 +145,16 @@ export default function CatalogClient({
   const [inventoryLookup, setInventoryLookup] = useState("");
   const [inventoryProductId, setInventoryProductId] = useState("");
   const [inventorySizeBarcode, setInventorySizeBarcode] = useState("");
+  const [inventoryQuantity, setInventoryQuantity] = useState(1);
   const [inventoryFeedback, setInventoryFeedback] = useState("");
   const [savedInventory, setSavedInventory] = useState<SavedInventory | null>(null);
+  const [inventoryHistory, setInventoryHistory] = useState<InventoryHistoryItem[]>([]);
+  const [inventoryOwner, setInventoryOwner] = useState("");
+  const [savingInventory, setSavingInventory] = useState(false);
   const [exportingInventory, setExportingInventory] = useState(false);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogPickerQuery, setCatalogPickerQuery] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerStatus, setScannerStatus] = useState("");
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -153,6 +211,20 @@ export default function CatalogClient({
     [inventoryProductId, supplier.products],
   );
 
+  const catalogPickerProducts = useMemo(() => {
+    const needle = normalize(catalogPickerQuery);
+    if (!needle) return supplier.products;
+    return supplier.products.filter((product) =>
+      normalize([
+        product.title,
+        product.brand,
+        product.id,
+        product.vendorCode,
+        product.sizes.map((size) => `${size.label} ${size.ru} ${size.barcode}`).join(" "),
+      ].join(" ")).includes(needle),
+    );
+  }, [catalogPickerQuery, supplier.products]);
+
   const inventoryTotal = inventoryItems.reduce((total, item) => total + item.count, 0);
   const visibleProducts = filteredProducts.slice(0, visibleCount);
   const totalSizes = supplier.products.reduce(
@@ -168,12 +240,18 @@ export default function CatalogClient({
     setInventoryHydrated(false);
     try {
       const saved = window.localStorage.getItem(inventoryStorageKey(supplier.slug));
-      setInventoryItems(saved ? (JSON.parse(saved) as InventoryItem[]) : []);
-      const savedSnapshot = window.localStorage.getItem(savedInventoryStorageKey(supplier.slug));
-      setSavedInventory(savedSnapshot ? (JSON.parse(savedSnapshot) as SavedInventory) : null);
+      const parsed = saved ? (JSON.parse(saved) as Partial<InventoryItem>[]) : [];
+      setInventoryItems(parsed.map((item) => ({
+        ...(item as InventoryItem),
+        defective: item.defective === true,
+        defectPhotos: Array.isArray(item.defectPhotos) ? item.defectPhotos : [],
+      })));
+      setSavedInventory(null);
+      setInventoryOwner(inventoryOwnerKey());
     } catch {
       setInventoryItems([]);
       setSavedInventory(null);
+      setInventoryOwner(inventoryOwnerKey());
     } finally {
       setInventoryHydrated(true);
     }
@@ -181,16 +259,36 @@ export default function CatalogClient({
 
   useEffect(() => {
     if (!inventoryHydrated) return;
-    window.localStorage.setItem(
-      inventoryStorageKey(supplier.slug),
-      JSON.stringify(inventoryItems),
-    );
+    try {
+      window.localStorage.setItem(
+        inventoryStorageKey(supplier.slug),
+        JSON.stringify(inventoryItems),
+      );
+    } catch {
+      setInventoryFeedback("Черновик с фото слишком большой для памяти браузера. Сохраните инвентаризацию на сервере.");
+    }
   }, [inventoryHydrated, inventoryItems, supplier.slug]);
 
   const invalidateSavedInventory = useCallback(() => {
     setSavedInventory(null);
-    window.localStorage.removeItem(savedInventoryStorageKey(supplier.slug));
-  }, [supplier.slug]);
+  }, []);
+
+  const loadInventoryHistory = useCallback(async () => {
+    if (!inventoryOwner) return;
+    try {
+      const params = new URLSearchParams({ ownerKey: inventoryOwner, supplierSlug: supplier.slug });
+      const response = await fetch(apiHref(`/api/inventories?${params}`));
+      if (!response.ok) throw new Error();
+      const data = await response.json() as { reports?: InventoryHistoryItem[] };
+      setInventoryHistory(data.reports ?? []);
+    } catch {
+      setInventoryHistory([]);
+    }
+  }, [inventoryOwner, supplier.slug]);
+
+  useEffect(() => {
+    if (inventoryOpen) void loadInventoryHistory();
+  }, [inventoryOpen, loadInventoryHistory]);
 
   useEffect(() => {
     if (!inventoryProduct) {
@@ -218,21 +316,24 @@ export default function CatalogClient({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (scannerOpen) setScannerOpen(false);
+      else if (catalogPickerOpen) setCatalogPickerOpen(false);
+      else if (historyOpen) setHistoryOpen(false);
       else if (inventoryOpen) setInventoryOpen(false);
       else if (selectedProduct) setSelectedProduct(null);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [inventoryOpen, scannerOpen, selectedProduct]);
+  }, [catalogPickerOpen, historyOpen, inventoryOpen, scannerOpen, selectedProduct]);
 
   const addInventorySize = useCallback(
-    (product: Product, size: Size, feedback = "Добавлено в ведомость") => {
+    (product: Product, size: Size, amount = 1, feedback = "Добавлено в ведомость") => {
       const key = `${product.id}:${size.barcode}`;
+      const safeAmount = Math.min(999, Math.max(1, Math.round(amount)));
       setInventoryItems((current) => {
         const existing = current.find((item) => item.key === key);
         if (existing) {
           return current.map((item) =>
-            item.key === key ? { ...item, count: item.count + 1 } : item,
+            item.key === key ? { ...item, count: item.count + safeAmount } : item,
           );
         }
 
@@ -246,7 +347,9 @@ export default function CatalogClient({
             sizeLabel: size.label,
             sizeRu: size.ru,
             barcode: size.barcode,
-            count: 1,
+            count: safeAmount,
+            defective: false,
+            defectPhotos: [],
           },
           ...current,
         ];
@@ -265,7 +368,7 @@ export default function CatalogClient({
           setInventoryLookup(barcode);
           setInventoryProductId(product.id);
           setInventorySizeBarcode(size.barcode);
-          addInventorySize(product, size, "Штрихкод распознан");
+          addInventorySize(product, size, 1, "Штрихкод распознан");
           return true;
         }
       }
@@ -370,7 +473,17 @@ export default function CatalogClient({
       setInventoryFeedback("Выберите размер");
       return;
     }
-    addInventorySize(inventoryProduct, size);
+    addInventorySize(inventoryProduct, size, inventoryQuantity);
+    setInventoryQuantity(1);
+  }
+
+  function chooseInventoryProduct(product: Product) {
+    setInventoryProductId(product.id);
+    setInventorySizeBarcode(product.sizes[0]?.barcode ?? "");
+    setInventoryLookup(product.title);
+    setInventoryQuantity(1);
+    setCatalogPickerOpen(false);
+    setInventoryFeedback(`Выбрана модель: ${product.title}. Укажите размер и количество.`);
   }
 
   function changeInventoryCount(key: string, difference: number) {
@@ -384,33 +497,103 @@ export default function CatalogClient({
     );
   }
 
-  function inventoryShareUrl(token: string) {
-    return `${window.location.origin}${localHref("/inventory/")}#${token}`;
+  function setInventoryDefective(key: string, defective: boolean) {
+    invalidateSavedInventory();
+    setInventoryItems((current) => current.map((item) =>
+      item.key === key
+        ? { ...item, defective, defectPhotos: defective ? item.defectPhotos : [] }
+        : item,
+    ));
   }
 
-  function saveInventory() {
+  async function addDefectPhotos(key: string, files: FileList | null) {
+    if (!files?.length) return;
+    const item = inventoryItems.find((entry) => entry.key === key);
+    if (!item) return;
+    const room = 10 - item.defectPhotos.length;
+    if (room <= 0) {
+      setInventoryFeedback("Для одной позиции можно добавить не больше 10 фото брака");
+      return;
+    }
+    try {
+      setInventoryFeedback("Обрабатываем фото…");
+      const photos: string[] = [];
+      for (const file of Array.from(files).slice(0, room)) {
+        if (!file.type.startsWith("image/")) continue;
+        photos.push(await compressDefectPhoto(file));
+      }
+      invalidateSavedInventory();
+      setInventoryItems((current) => current.map((entry) =>
+        entry.key === key
+          ? { ...entry, defective: true, defectPhotos: [...entry.defectPhotos, ...photos].slice(0, 10) }
+          : entry,
+      ));
+      const skipped = Math.max(0, files.length - room);
+      setInventoryFeedback(`${photos.length} фото добавлено${skipped ? `. Ещё ${skipped} не добавлено: лимит 10.` : ""}`);
+    } catch {
+      setInventoryFeedback("Не удалось обработать фото. Попробуйте другой файл.");
+    }
+  }
+
+  function removeDefectPhoto(key: string, photoIndex: number) {
+    invalidateSavedInventory();
+    setInventoryItems((current) => current.map((item) =>
+      item.key === key
+        ? { ...item, defectPhotos: item.defectPhotos.filter((_, index) => index !== photoIndex) }
+        : item,
+    ));
+  }
+
+  function inventoryShareUrl(id: string) {
+    return `${window.location.origin}${localHref("/inventory/")}?id=${encodeURIComponent(id)}`;
+  }
+
+  async function saveInventory() {
     if (!inventoryItems.length) {
       setInventoryFeedback("Добавьте хотя бы одну позицию перед сохранением");
       return;
     }
-
-    const savedAt = new Date().toISOString();
-    const items = inventoryItems.map((item) => ({ ...item }));
-    const token = createInventoryShareToken({
-      v: 1,
-      s: supplier.slug,
-      d: savedAt,
-      i: items.map((item) => [item.productId, item.barcode, item.count]),
-    });
-    const snapshot = { savedAt, token, items };
-    setSavedInventory(snapshot);
-    window.localStorage.setItem(savedInventoryStorageKey(supplier.slug), JSON.stringify(snapshot));
-    setInventoryFeedback("Инвентаризация сохранена. Теперь её можно выгрузить или отправить по ссылке.");
+    if (!inventoryOwner || savingInventory) return;
+    setSavingInventory(true);
+    setInventoryFeedback("Сохраняем отчёт и фото…");
+    try {
+      const response = await fetch(apiHref("/api/inventories"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ownerKey: inventoryOwner,
+          supplierSlug: supplier.slug,
+          items: inventoryItems.map((item) => ({
+            productId: item.productId,
+            barcode: item.barcode,
+            count: item.count,
+            defective: item.defective,
+            photos: item.defectPhotos,
+          })),
+        }),
+      });
+      const result = await response.json() as { id?: string; savedAt?: string; error?: string };
+      if (!response.ok || !result.id || !result.savedAt) {
+        throw new Error(result.error || "Не удалось сохранить инвентаризацию");
+      }
+      const snapshot = {
+        id: result.id,
+        savedAt: result.savedAt,
+        items: inventoryItems.map((item) => ({ ...item, defectPhotos: [...item.defectPhotos] })),
+      };
+      setSavedInventory(snapshot);
+      await loadInventoryHistory();
+      setInventoryFeedback("Инвентаризация сохранена отдельным отчётом. Её можно скачать или отправить по ссылке.");
+    } catch (error) {
+      setInventoryFeedback(error instanceof Error ? error.message : "Не удалось сохранить инвентаризацию");
+    } finally {
+      setSavingInventory(false);
+    }
   }
 
   async function copyInventoryLink() {
     if (!savedInventory) return;
-    const url = inventoryShareUrl(savedInventory.token);
+    const url = inventoryShareUrl(savedInventory.id);
     try {
       await navigator.clipboard.writeText(url);
       setInventoryFeedback("Ссылка скопирована — её можно отправить любому получателю");
@@ -423,6 +606,27 @@ export default function CatalogClient({
       input.remove();
       setInventoryFeedback("Ссылка скопирована — её можно отправить любому получателю");
     }
+  }
+
+  async function copyHistoryLink(id: string) {
+    const url = inventoryShareUrl(id);
+    try {
+      await navigator.clipboard.writeText(url);
+      setInventoryFeedback("Ссылка на сохранённый отчёт скопирована");
+    } catch {
+      setInventoryFeedback("Не удалось скопировать ссылку. Откройте отчёт и скопируйте адрес браузера.");
+    }
+  }
+
+  function startNewInventory() {
+    setInventoryItems([]);
+    setSavedInventory(null);
+    setInventoryLookup("");
+    setInventoryProductId("");
+    setInventorySizeBarcode("");
+    setInventoryQuantity(1);
+    window.localStorage.removeItem(inventoryStorageKey(supplier.slug));
+    setInventoryFeedback("Создана новая пустая инвентаризация. Предыдущий отчёт остался в истории.");
   }
 
   async function exportInventoryExcel() {
@@ -447,19 +651,21 @@ export default function CatalogClient({
         { key: "ru", width: 11 },
         { key: "barcode", width: 22 },
         { key: "count", width: 14 },
+        { key: "defective", width: 12 },
+        { key: "photos", width: 14 },
       ];
 
-      sheet.mergeCells("A1:I1");
+      sheet.mergeCells("A1:K1");
       sheet.getCell("A1").value = "Остатки после инвентаризации";
       sheet.getCell("A1").font = { bold: true, size: 18, color: { argb: "FF171817" } };
       sheet.getCell("A1").alignment = { vertical: "middle" };
       sheet.getRow(1).height = 34;
 
       sheet.getCell("A2").value = "Кабинет";
-      sheet.mergeCells("B2:I2");
+      sheet.mergeCells("B2:K2");
       sheet.getCell("B2").value = supplier.legalName;
       sheet.getCell("A3").value = "Магазин";
-      sheet.mergeCells("B3:I3");
+      sheet.mergeCells("B3:K3");
       sheet.getCell("B3").value = `${supplier.country} · ${supplier.storeName}`;
       sheet.getCell("A4").value = "Сохранено";
       sheet.mergeCells("B4:C4");
@@ -469,8 +675,10 @@ export default function CatalogClient({
       sheet.getCell("E4").value = savedInventory.items.length;
       sheet.getCell("G4").value = "Единиц";
       sheet.getCell("H4").value = savedInventory.items.reduce((sum, item) => sum + item.count, 0);
+      sheet.getCell("J4").value = "С браком";
+      sheet.getCell("K4").value = savedInventory.items.filter((item) => item.defective).length;
 
-      ["A2", "A3", "A4", "D4", "G4"].forEach((address) => {
+      ["A2", "A3", "A4", "D4", "G4", "J4"].forEach((address) => {
         sheet.getCell(address).font = { bold: true, color: { argb: "FF696A64" } };
       });
       for (let rowNumber = 1; rowNumber <= 4; rowNumber += 1) {
@@ -498,6 +706,8 @@ export default function CatalogClient({
           { name: "RU" },
           { name: "Штрихкод" },
           { name: "Количество" },
+          { name: "Брак" },
+          { name: "Фото брака" },
         ],
         rows: savedInventory.items.map((item) => [
           supplier.legalName,
@@ -509,11 +719,60 @@ export default function CatalogClient({
           item.sizeRu,
           item.barcode,
           item.count,
+          item.defective ? "Да" : "Нет",
+          item.defectPhotos.length,
         ]),
       });
       sheet.getColumn("H").numFmt = "@";
       sheet.getColumn("I").numFmt = "#,##0";
       sheet.getColumn("I").alignment = { horizontal: "right" };
+
+      const photoItems = savedInventory.items.filter((item) => item.defectPhotos.length);
+      if (photoItems.length) {
+        const photoSheet = workbook.addWorksheet("Фото брака", {
+          views: [{ state: "frozen", ySplit: 3 }],
+          properties: { defaultRowHeight: 20 },
+        });
+        photoSheet.columns = [
+          { key: "model", width: 42 },
+          { key: "size", width: 16 },
+          { key: "barcode", width: 22 },
+          { key: "number", width: 12 },
+          { key: "photo", width: 28 },
+        ];
+        photoSheet.mergeCells("A1:E1");
+        photoSheet.getCell("A1").value = "Фото брака";
+        photoSheet.getCell("A1").font = { bold: true, size: 18, color: { argb: "FF171817" } };
+        photoSheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F0E8" } };
+        photoSheet.getRow(1).height = 34;
+        photoSheet.getRow(3).values = ["Модель", "Размер", "Штрихкод", "Фото №", "Изображение"];
+        photoSheet.getRow(3).font = { bold: true, color: { argb: "FFFFFFFF" } };
+        photoSheet.getRow(3).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F6150" } };
+        let rowNumber = 4;
+        for (const item of photoItems) {
+          for (let photoIndex = 0; photoIndex < item.defectPhotos.length; photoIndex += 1) {
+            photoSheet.getRow(rowNumber).values = [
+              item.title,
+              `${item.sizeLabel} / RU ${item.sizeRu || "—"}`,
+              item.barcode,
+              photoIndex + 1,
+              "",
+            ];
+            photoSheet.getCell(`C${rowNumber}`).numFmt = "@";
+            photoSheet.getRow(rowNumber).height = 96;
+            const imageId = workbook.addImage({
+              base64: item.defectPhotos[photoIndex],
+              extension: "jpeg",
+            });
+            photoSheet.addImage(imageId, {
+              tl: { col: 4.08, row: rowNumber - 0.92 },
+              ext: { width: 150, height: 118 },
+            });
+            rowNumber += 1;
+          }
+        }
+        photoSheet.autoFilter = { from: "A3", to: `E${Math.max(3, rowNumber - 1)}` };
+      }
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
@@ -802,6 +1061,16 @@ export default function CatalogClient({
               <div className="inventory-summary">
                 <span><strong>{inventoryItems.length}</strong> позиций</span>
                 <span><strong>{inventoryTotal}</strong> единиц</span>
+                <button
+                  className="inventory-history-button"
+                  type="button"
+                  onClick={() => {
+                    setHistoryOpen(true);
+                    void loadInventoryHistory();
+                  }}
+                >
+                  Отчёты {inventoryHistory.length ? `(${inventoryHistory.length})` : ""}
+                </button>
               </div>
               <button
                 className="close-inventory"
@@ -826,7 +1095,18 @@ export default function CatalogClient({
                   <span aria-hidden="true">▣</span>
                   Сканировать камерой
                 </button>
-                <div className="entry-divider"><span>или вручную</span></div>
+                <button
+                  className="catalog-picker-button"
+                  type="button"
+                  onClick={() => {
+                    setCatalogPickerQuery("");
+                    setCatalogPickerOpen(true);
+                  }}
+                >
+                  <span aria-hidden="true">▦</span>
+                  Выбрать из общего каталога
+                </button>
+                <div className="entry-divider"><span>или найти вручную</span></div>
 
                 <label className="inventory-field">
                   <span>Штрихкод или название</span>
@@ -836,6 +1116,19 @@ export default function CatalogClient({
                     onChange={(event) => handleInventoryLookup(event.target.value)}
                     placeholder="Например, 2041531851844 или Air 95"
                     aria-label="Штрихкод или название модели для инвентаризации"
+                  />
+                </label>
+
+                <label className="inventory-field inventory-quantity-field">
+                  <span>Количество, шт.</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    max="999"
+                    value={inventoryQuantity}
+                    onChange={(event) => setInventoryQuantity(Math.min(999, Math.max(1, Number(event.target.value) || 1)))}
+                    aria-label="Количество для добавления"
                   />
                 </label>
 
@@ -895,8 +1188,8 @@ export default function CatalogClient({
                 {inventoryItems.length ? (
                   <div className="inventory-list">
                     {inventoryItems.map((item) => (
-                      <article className="inventory-item" key={item.key}>
-                        <div>
+                      <article className={`inventory-item${item.defective ? " is-defective" : ""}`} key={item.key}>
+                        <div className="inventory-item-copy">
                           <strong>{item.title}</strong>
                           <span>{item.brand} · {item.sizeLabel} · RU {item.sizeRu || "—"}</span>
                           <code>{item.barcode}</code>
@@ -918,6 +1211,65 @@ export default function CatalogClient({
                             +
                           </button>
                         </div>
+                        <div className="defect-controls">
+                          <label className="defect-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={item.defective}
+                              onChange={(event) => setInventoryDefective(item.key, event.target.checked)}
+                            />
+                            <span>Брак</span>
+                          </label>
+                          {item.defective ? (
+                            <div className="defect-photo-panel">
+                              <div className="defect-photo-actions">
+                                <label>
+                                  Снять фото
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    capture="environment"
+                                    onChange={(event) => {
+                                      const input = event.currentTarget;
+                                      void addDefectPhotos(item.key, input.files).finally(() => { input.value = ""; });
+                                    }}
+                                  />
+                                </label>
+                                <label>
+                                  Из галереи
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={(event) => {
+                                      const input = event.currentTarget;
+                                      void addDefectPhotos(item.key, input.files).finally(() => { input.value = ""; });
+                                    }}
+                                  />
+                                </label>
+                                <span>{item.defectPhotos.length}/10</span>
+                              </div>
+                              {item.defectPhotos.length ? (
+                                <div className="defect-photo-grid">
+                                  {item.defectPhotos.map((photo, photoIndex) => (
+                                    <div key={`${item.key}:photo:${photoIndex}`}>
+                                      <img src={photo} alt={`Фото брака ${photoIndex + 1}: ${item.title}`} />
+                                      <button
+                                        type="button"
+                                        onClick={() => removeDefectPhoto(item.key, photoIndex)}
+                                        aria-label={`Удалить фото брака ${photoIndex + 1}`}
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p>Добавьте до 10 фото брака с камеры или из галереи.</p>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -936,9 +1288,9 @@ export default function CatalogClient({
                 className="inventory-save"
                 type="button"
                 onClick={saveInventory}
-                disabled={!inventoryItems.length}
+                disabled={!inventoryItems.length || savingInventory}
               >
-                Сохранить инвентаризацию
+                {savingInventory ? "Сохраняем…" : "Сохранить инвентаризацию"}
               </button>
               {savedInventory ? (
                 <div className="inventory-saved-actions" role="status">
@@ -951,16 +1303,91 @@ export default function CatalogClient({
                     {exportingInventory ? "Готовим Excel…" : "Выгрузить в Excel"}
                   </button>
                   <a
-                    href={inventoryShareUrl(savedInventory.token)}
+                    href={inventoryShareUrl(savedInventory.id)}
                     target="_blank"
                     rel="noreferrer"
                   >
                     Посмотреть на сайте
                   </a>
                   <button type="button" onClick={copyInventoryLink}>Копировать ссылку</button>
+                  <button className="inventory-new" type="button" onClick={startNewInventory}>
+                    Создать новую
+                  </button>
                 </div>
               ) : null}
             </footer>
+
+            {catalogPickerOpen ? (
+              <div className="inventory-overlay inventory-picker-layer" role="dialog" aria-modal="true" aria-label="Общий каталог моделей">
+                <header>
+                  <div>
+                    <p>Нажмите на карточку — модель заполнит форму</p>
+                    <h3>Общий каталог</h3>
+                  </div>
+                  <button type="button" onClick={() => setCatalogPickerOpen(false)} aria-label="Закрыть общий каталог">×</button>
+                </header>
+                <div className="inventory-overlay-search">
+                  <input
+                    type="search"
+                    autoFocus
+                    value={catalogPickerQuery}
+                    onChange={(event) => setCatalogPickerQuery(event.target.value)}
+                    placeholder="Модель, артикул, размер или штрихкод"
+                    aria-label="Поиск модели в общем каталоге"
+                  />
+                  <span>{catalogPickerProducts.length} моделей</span>
+                </div>
+                <div className="inventory-picker-grid">
+                  {catalogPickerProducts.map((product) => (
+                    <button type="button" key={product.id} onClick={() => chooseInventoryProduct(product)}>
+                      <span className="inventory-picker-image">
+                        {product.photos[0] ? <img src={product.photos[0]} alt="" /> : null}
+                      </span>
+                      <span className="inventory-picker-copy">
+                        <small>{product.brand}</small>
+                        <strong>{product.title}</strong>
+                        <span>WB {product.id} · {product.sizes.length} размеров</span>
+                        <em>{product.sizes.slice(0, 5).map((size) => size.label || size.ru).filter(Boolean).join(" · ")}</em>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {historyOpen ? (
+              <div className="inventory-overlay inventory-history-layer" role="dialog" aria-modal="true" aria-label="Сохранённые отчёты">
+                <header>
+                  <div>
+                    <p>{supplier.storeName}</p>
+                    <h3>Сохранённые отчёты</h3>
+                  </div>
+                  <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Закрыть историю отчётов">×</button>
+                </header>
+                {inventoryHistory.length ? (
+                  <div className="inventory-history-list">
+                    {inventoryHistory.map((report) => (
+                      <article key={report.id}>
+                        <div>
+                          <strong>{formatInventoryDate(report.savedAt)}</strong>
+                          <span>{report.positionCount} позиций · {report.totalCount} единиц · {report.defectiveCount} с браком</span>
+                        </div>
+                        <div>
+                          <a href={inventoryShareUrl(report.id)} target="_blank" rel="noreferrer">Открыть</a>
+                          <button type="button" onClick={() => copyHistoryLink(report.id)}>Копировать ссылку</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="inventory-history-empty">
+                    <span aria-hidden="true">▦</span>
+                    <strong>Сохранённых отчётов пока нет</strong>
+                    <p>Завершите текущую инвентаризацию — она появится здесь отдельной записью.</p>
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {scannerOpen ? (
               <div className="scanner-layer">

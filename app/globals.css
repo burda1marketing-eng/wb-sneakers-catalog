@@ -1820,6 +1820,590 @@ a {
   }
 }
 
+.inventory-panel {
+  width: min(1180px, 100%);
+}
+
+.inventory-history-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.catalog-picker-button {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.catalog-picker-button span {
+  color: var(--acid-dark);
+  font-size: 20px;
+}
+
+.inventory-quantity-field input {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.inventory-item.is-defective {
+  border-color: #e2a68d;
+  background: #fff9f6;
+}
+
+.inventory-item-copy {
+  min-width: 0;
+}
+
+.defect-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.defect-checkbox {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.defect-checkbox input {
+  width: 20px;
+  height: 20px;
+  accent-color: #d8512d;
+}
+
+.defect-checkbox span {
+  margin: 0;
+  color: var(--ink);
+}
+
+.defect-photo-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.defect-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.defect-photo-actions label {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid #d8512d;
+  border-radius: 10px;
+  background: #fff;
+  color: #a3371d;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.defect-photo-actions input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.defect-photo-actions > span {
+  margin: 0 0 0 auto;
+  color: #a3371d;
+  font-weight: 850;
+}
+
+.defect-photo-panel > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.defect-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 8px;
+}
+
+.defect-photo-grid > div {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eee9df;
+}
+
+.defect-photo-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.defect-photo-grid button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(23 24 23 / 0.88);
+  color: #fff;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.inventory-new {
+  border-color: var(--ink) !important;
+}
+
+.inventory-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.inventory-overlay > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inventory-overlay > header p,
+.inventory-overlay > header h3 {
+  margin: 0;
+}
+
+.inventory-overlay > header p {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.inventory-overlay > header h3 {
+  font-size: 26px;
+  letter-spacing: -0.04em;
+}
+
+.inventory-overlay > header > button {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.inventory-overlay-search {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #f3f0e8;
+}
+
+.inventory-overlay-search input {
+  width: 100%;
+  min-width: 0;
+  height: 50px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 14px;
+}
+
+.inventory-overlay-search span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.inventory-picker-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-content: start;
+  padding: 18px 24px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.inventory-picker-grid > button {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inventory-picker-grid > button:hover {
+  border-color: var(--ink);
+  transform: translateY(-2px);
+}
+
+.inventory-picker-image {
+  display: grid;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  overflow: hidden;
+  background: #ece9e1;
+}
+
+.inventory-picker-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  mix-blend-mode: multiply;
+}
+
+.inventory-picker-copy {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  padding: 13px;
+}
+
+.inventory-picker-copy small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.inventory-picker-copy strong {
+  margin: 5px 0 9px;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+}
+
+.inventory-picker-copy span,
+.inventory-picker-copy em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.inventory-picker-copy em {
+  margin-top: 8px;
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.inventory-history-layer {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.inventory-history-list {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+}
+
+.inventory-history-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.inventory-history-list article strong,
+.inventory-history-list article span {
+  display: block;
+}
+
+.inventory-history-list article span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.inventory-history-list article > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.inventory-history-list a,
+.inventory-history-list button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 13px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.inventory-history-list a {
+  background: var(--acid);
+}
+
+.inventory-history-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  padding: 32px;
+  text-align: center;
+}
+
+.inventory-history-empty > span {
+  color: var(--acid-dark);
+  font-size: 38px;
+}
+
+.inventory-history-empty p {
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.report-item.is-defective {
+  border-color: #e2a68d;
+}
+
+.report-item-meta strong {
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: #f9d8ca;
+  color: #a3371d;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.report-defect-block {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #ead0c4;
+}
+
+.report-defect-block > div:first-child strong,
+.report-defect-block > div:first-child span {
+  display: block;
+}
+
+.report-defect-block > div:first-child strong {
+  color: #a3371d;
+}
+
+.report-defect-block > div:first-child span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.report-defect-photos {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.report-defect-photos button {
+  width: 82px;
+  height: 68px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #eee9df;
+  cursor: zoom-in;
+}
+
+.report-defect-photos img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.report-photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  padding: 28px;
+  place-items: center;
+  border: 0;
+  background: rgb(10 11 10 / 0.92);
+  cursor: zoom-out;
+}
+
+.report-photo-lightbox img {
+  max-width: 100%;
+  max-height: calc(100dvh - 100px);
+  border-radius: 14px;
+  object-fit: contain;
+}
+
+.report-photo-lightbox span {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+  padding: 10px 13px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+@media (max-width: 900px) {
+  .inventory-picker-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .inventory-overlay {
+    position: fixed;
+  }
+
+  .inventory-picker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-history-list article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .inventory-summary {
+    flex-wrap: wrap;
+  }
+
+  .inventory-history-button {
+    min-height: 32px;
+  }
+
+  .inventory-item-copy > strong {
+    white-space: normal;
+  }
+
+  .defect-photo-actions > span {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .inventory-overlay > header,
+  .inventory-overlay-search,
+  .inventory-picker-grid,
+  .inventory-history-list {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .inventory-overlay > header h3 {
+    font-size: 23px;
+  }
+
+  .inventory-overlay-search {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .inventory-picker-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inventory-picker-grid > button {
+    grid-template-columns: minmax(120px, 0.42fr) minmax(0, 0.58fr);
+    grid-template-rows: auto;
+  }
+
+  .inventory-picker-image {
+    height: 100%;
+    min-height: 130px;
+  }
+
+  .inventory-history-list article > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-defect-block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .report-defect-photos button {
+    width: 100px;
+    height: 82px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

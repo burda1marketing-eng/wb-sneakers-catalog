@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1785349240741,
+      "tag": "0000_wise_mother_askani",
+      "breakpoints": true
+    }
+  ]
 }
