@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Responsive QA</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 12px; background: #252623; font: 12px system-ui; color: white; }
+      main { display: flex; gap: 16px; align-items: flex-start; }
+      section { display: grid; gap: 6px; }
+      iframe { display: block; height: 720px; border: 2px solid #aeea00; background: white; }
+      .tablet { width: 768px; }
+      .mobile { width: 390px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section><strong>Tablet · 768 px</strong><iframe class="tablet" name="tablet" src="./?qa=tablet"></iframe></section>
+      <section><strong>Mobile · 390 px</strong><iframe class="mobile" name="mobile" src="./?qa=mobile"></iframe></section>
+    </main>
+  </body>
+</html>
