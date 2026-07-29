@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IScannerControls } from "@zxing/browser";
+import { createInventoryShareToken } from "./inventory/share";
 
 type Size = {
   label: string;
@@ -50,6 +51,12 @@ type InventoryItem = {
   count: number;
 };
 
+type SavedInventory = {
+  savedAt: string;
+  token: string;
+  items: InventoryItem[];
+};
+
 const PAGE_SIZE = 24;
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -63,6 +70,10 @@ function normalize(value: string) {
 
 function inventoryStorageKey(supplierSlug: string) {
   return `wb-catalog-inventory:${supplierSlug}`;
+}
+
+function savedInventoryStorageKey(supplierSlug: string) {
+  return `wb-catalog-inventory-saved:${supplierSlug}`;
 }
 
 export default function CatalogClient({
@@ -84,6 +95,8 @@ export default function CatalogClient({
   const [inventoryProductId, setInventoryProductId] = useState("");
   const [inventorySizeBarcode, setInventorySizeBarcode] = useState("");
   const [inventoryFeedback, setInventoryFeedback] = useState("");
+  const [savedInventory, setSavedInventory] = useState<SavedInventory | null>(null);
+  const [exportingInventory, setExportingInventory] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerStatus, setScannerStatus] = useState("");
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -156,8 +169,11 @@ export default function CatalogClient({
     try {
       const saved = window.localStorage.getItem(inventoryStorageKey(supplier.slug));
       setInventoryItems(saved ? (JSON.parse(saved) as InventoryItem[]) : []);
+      const savedSnapshot = window.localStorage.getItem(savedInventoryStorageKey(supplier.slug));
+      setSavedInventory(savedSnapshot ? (JSON.parse(savedSnapshot) as SavedInventory) : null);
     } catch {
       setInventoryItems([]);
+      setSavedInventory(null);
     } finally {
       setInventoryHydrated(true);
     }
@@ -170,6 +186,11 @@ export default function CatalogClient({
       JSON.stringify(inventoryItems),
     );
   }, [inventoryHydrated, inventoryItems, supplier.slug]);
+
+  const invalidateSavedInventory = useCallback(() => {
+    setSavedInventory(null);
+    window.localStorage.removeItem(savedInventoryStorageKey(supplier.slug));
+  }, [supplier.slug]);
 
   useEffect(() => {
     if (!inventoryProduct) {
@@ -230,9 +251,10 @@ export default function CatalogClient({
           ...current,
         ];
       });
+      invalidateSavedInventory();
       setInventoryFeedback(`${feedback}: ${product.title}, ${size.label || size.ru}`);
     },
-    [],
+    [invalidateSavedInventory],
   );
 
   const registerScannedBarcode = useCallback(
@@ -352,6 +374,7 @@ export default function CatalogClient({
   }
 
   function changeInventoryCount(key: string, difference: number) {
+    invalidateSavedInventory();
     setInventoryItems((current) =>
       current
         .map((item) =>
@@ -361,31 +384,155 @@ export default function CatalogClient({
     );
   }
 
-  function exportInventory() {
-    const rows = [
-      ["Кабинет", "Модель", "Бренд", "Артикул WB", "Артикул продавца", "Размер", "RU", "Штрихкод", "Количество"],
-      ...inventoryItems.map((item) => [
-        supplier.legalName,
-        item.title,
-        item.brand,
-        item.productId,
-        item.vendorCode,
-        item.sizeLabel,
-        item.sizeRu,
-        item.barcode,
-        String(item.count),
-      ]),
-    ];
-    const csv = rows
-      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";"))
-      .join("\n");
-    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `inventory-${supplier.slug}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  function inventoryShareUrl(token: string) {
+    return `${window.location.origin}${localHref("/inventory/")}#${token}`;
+  }
+
+  function saveInventory() {
+    if (!inventoryItems.length) {
+      setInventoryFeedback("Добавьте хотя бы одну позицию перед сохранением");
+      return;
+    }
+
+    const savedAt = new Date().toISOString();
+    const items = inventoryItems.map((item) => ({ ...item }));
+    const token = createInventoryShareToken({
+      v: 1,
+      s: supplier.slug,
+      d: savedAt,
+      i: items.map((item) => [item.productId, item.barcode, item.count]),
+    });
+    const snapshot = { savedAt, token, items };
+    setSavedInventory(snapshot);
+    window.localStorage.setItem(savedInventoryStorageKey(supplier.slug), JSON.stringify(snapshot));
+    setInventoryFeedback("Инвентаризация сохранена. Теперь её можно выгрузить или отправить по ссылке.");
+  }
+
+  async function copyInventoryLink() {
+    if (!savedInventory) return;
+    const url = inventoryShareUrl(savedInventory.token);
+    try {
+      await navigator.clipboard.writeText(url);
+      setInventoryFeedback("Ссылка скопирована — её можно отправить любому получателю");
+    } catch {
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+      setInventoryFeedback("Ссылка скопирована — её можно отправить любому получателю");
+    }
+  }
+
+  async function exportInventoryExcel() {
+    if (!savedInventory || exportingInventory) return;
+    setExportingInventory(true);
+    try {
+      const { Workbook } = await import("exceljs");
+      const workbook = new Workbook();
+      workbook.creator = "Каталог обуви";
+      workbook.created = new Date(savedInventory.savedAt);
+      const sheet = workbook.addWorksheet("Инвентаризация", {
+        views: [{ state: "frozen", ySplit: 6 }],
+        properties: { defaultRowHeight: 20 },
+      });
+      sheet.columns = [
+        { key: "cabinet", width: 28 },
+        { key: "model", width: 42 },
+        { key: "brand", width: 18 },
+        { key: "wb", width: 16 },
+        { key: "vendor", width: 20 },
+        { key: "size", width: 16 },
+        { key: "ru", width: 11 },
+        { key: "barcode", width: 22 },
+        { key: "count", width: 14 },
+      ];
+
+      sheet.mergeCells("A1:I1");
+      sheet.getCell("A1").value = "Остатки после инвентаризации";
+      sheet.getCell("A1").font = { bold: true, size: 18, color: { argb: "FF171817" } };
+      sheet.getCell("A1").alignment = { vertical: "middle" };
+      sheet.getRow(1).height = 34;
+
+      sheet.getCell("A2").value = "Кабинет";
+      sheet.mergeCells("B2:I2");
+      sheet.getCell("B2").value = supplier.legalName;
+      sheet.getCell("A3").value = "Магазин";
+      sheet.mergeCells("B3:I3");
+      sheet.getCell("B3").value = `${supplier.country} · ${supplier.storeName}`;
+      sheet.getCell("A4").value = "Сохранено";
+      sheet.mergeCells("B4:C4");
+      sheet.getCell("B4").value = new Date(savedInventory.savedAt);
+      sheet.getCell("B4").numFmt = "yyyy-mm-dd hh:mm";
+      sheet.getCell("D4").value = "Позиций";
+      sheet.getCell("E4").value = savedInventory.items.length;
+      sheet.getCell("G4").value = "Единиц";
+      sheet.getCell("H4").value = savedInventory.items.reduce((sum, item) => sum + item.count, 0);
+
+      ["A2", "A3", "A4", "D4", "G4"].forEach((address) => {
+        sheet.getCell(address).font = { bold: true, color: { argb: "FF696A64" } };
+      });
+      for (let rowNumber = 1; rowNumber <= 4; rowNumber += 1) {
+        sheet.getRow(rowNumber).eachCell({ includeEmpty: true }, (cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF3F0E8" },
+          };
+        });
+      }
+
+      sheet.addTable({
+        name: "InventoryTable",
+        ref: "A6",
+        headerRow: true,
+        style: { theme: "TableStyleMedium4", showRowStripes: true },
+        columns: [
+          { name: "Кабинет" },
+          { name: "Модель" },
+          { name: "Бренд" },
+          { name: "Артикул WB" },
+          { name: "Артикул продавца" },
+          { name: "Размер" },
+          { name: "RU" },
+          { name: "Штрихкод" },
+          { name: "Количество" },
+        ],
+        rows: savedInventory.items.map((item) => [
+          supplier.legalName,
+          item.title,
+          item.brand,
+          item.productId,
+          item.vendorCode,
+          item.sizeLabel,
+          item.sizeRu,
+          item.barcode,
+          item.count,
+        ]),
+      });
+      sheet.getColumn("H").numFmt = "@";
+      sheet.getColumn("I").numFmt = "#,##0";
+      sheet.getColumn("I").alignment = { horizontal: "right" };
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `inventory-${supplier.slug}-${savedInventory.savedAt.slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setInventoryFeedback("Excel-файл сформирован и скачан");
+    } catch {
+      setInventoryFeedback("Не удалось сформировать Excel-файл. Попробуйте ещё раз.");
+    } finally {
+      setExportingInventory(false);
+    }
   }
 
   return (
@@ -743,9 +890,6 @@ export default function CatalogClient({
               <div className="inventory-list-panel">
                 <div className="inventory-list-heading">
                   <h3>Найдено</h3>
-                  {inventoryItems.length ? (
-                    <button type="button" onClick={exportInventory}>Скачать CSV</button>
-                  ) : null}
                 </div>
 
                 {inventoryItems.length ? (
@@ -786,6 +930,37 @@ export default function CatalogClient({
                 )}
               </div>
             </div>
+
+            <footer className="inventory-footer">
+              <button
+                className="inventory-save"
+                type="button"
+                onClick={saveInventory}
+                disabled={!inventoryItems.length}
+              >
+                Сохранить инвентаризацию
+              </button>
+              {savedInventory ? (
+                <div className="inventory-saved-actions" role="status">
+                  <span>Сохранено · {savedInventory.items.length} позиций</span>
+                  <button
+                    type="button"
+                    onClick={exportInventoryExcel}
+                    disabled={exportingInventory}
+                  >
+                    {exportingInventory ? "Готовим Excel…" : "Выгрузить в Excel"}
+                  </button>
+                  <a
+                    href={inventoryShareUrl(savedInventory.token)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Посмотреть на сайте
+                  </a>
+                  <button type="button" onClick={copyInventoryLink}>Копировать ссылку</button>
+                </div>
+              ) : null}
+            </footer>
 
             {scannerOpen ? (
               <div className="scanner-layer">

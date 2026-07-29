@@ -8,6 +8,7 @@ const basePath = "/wb-sneakers-catalog";
 const publicOrigin = "https://burda1marketing-eng.github.io";
 const routes = [
   "/",
+  "/inventory",
   "/catalog/filippov-ru",
   "/catalog/filippov-kg",
   "/catalog/rubtsova-lv-ru",

@@ -55,6 +55,12 @@ test("renders a separate page for every supplier", async () => {
   }
 });
 
+test("renders the shareable inventory report route", async () => {
+  const response = await render("/inventory");
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /Загружаем сохранённую инвентаризацию/);
+});
+
 test("ships responsive navigation, compact details and camera inventory code", async () => {
   const [component, styles] = await Promise.all([
     readFile(new URL("../app/CatalogClient.tsx", import.meta.url), "utf8"),
@@ -65,8 +71,14 @@ test("ships responsive navigation, compact details and camera inventory code", a
   assert.match(component, /Сканировать камерой/);
   assert.match(component, /Штрихкод или название/);
   assert.match(component, /Размер для инвентаризации/);
+  assert.match(component, /Сохранить инвентаризацию/);
+  assert.match(component, /Выгрузить в Excel/);
+  assert.match(component, /Посмотреть на сайте/);
+  assert.match(component, /\.xlsx/);
   assert.doesNotMatch(component, /className="description"|className="modal-media"/);
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /supplier-mobile-switcher/);
+  assert.match(styles, /inventory-saved-actions/);
+  assert.match(styles, /report-item/);
   assert.match(styles, /repeat\(auto-fill, minmax/);
 });
