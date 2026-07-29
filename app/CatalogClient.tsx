@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IScannerControls } from "@zxing/browser";
+import { createInventoryShareToken } from "./inventory/share";
 
 type Size = {
   label: string;
@@ -54,7 +55,8 @@ type InventoryItem = {
 };
 
 type SavedInventory = {
-  id: string;
+  id?: string;
+  token?: string;
   savedAt: string;
   items: InventoryItem[];
 };
@@ -66,6 +68,7 @@ type InventoryHistoryItem = {
   positionCount: number;
   totalCount: number;
   defectiveCount: number;
+  token?: string;
 };
 
 const PAGE_SIZE = 24;
@@ -82,6 +85,10 @@ function normalize(value: string) {
 
 function inventoryStorageKey(supplierSlug: string) {
   return `wb-catalog-inventory:${supplierSlug}`;
+}
+
+function inventoryHistoryStorageKey(supplierSlug: string) {
+  return `wb-catalog-inventory-history:${supplierSlug}`;
 }
 
 function apiHref(pathname: string) {
@@ -117,14 +124,14 @@ async function compressDefectPhoto(file: File) {
     element.onerror = () => reject(new Error("Не удалось открыть фото"));
     element.src = dataUrl;
   });
-  const scale = Math.min(1, 1080 / Math.max(image.naturalWidth, image.naturalHeight));
+  const scale = Math.min(1, 720 / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Не удалось обработать фото");
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.72);
+  return canvas.toDataURL("image/jpeg", 0.62);
 }
 
 export default function CatalogClient({
@@ -275,14 +282,22 @@ export default function CatalogClient({
 
   const loadInventoryHistory = useCallback(async () => {
     if (!inventoryOwner) return;
+    let localReports: InventoryHistoryItem[] = [];
+    try {
+      const saved = window.localStorage.getItem(inventoryHistoryStorageKey(supplier.slug));
+      localReports = saved ? (JSON.parse(saved) as InventoryHistoryItem[]) : [];
+    } catch {
+      localReports = [];
+    }
     try {
       const params = new URLSearchParams({ ownerKey: inventoryOwner, supplierSlug: supplier.slug });
       const response = await fetch(apiHref(`/api/inventories?${params}`));
       if (!response.ok) throw new Error();
       const data = await response.json() as { reports?: InventoryHistoryItem[] };
-      setInventoryHistory(data.reports ?? []);
+      const serverReports = data.reports ?? [];
+      setInventoryHistory([...serverReports, ...localReports].sort((a, b) => b.savedAt.localeCompare(a.savedAt)));
     } catch {
-      setInventoryHistory([]);
+      setInventoryHistory(localReports);
     }
   }, [inventoryOwner, supplier.slug]);
 
@@ -544,8 +559,9 @@ export default function CatalogClient({
     ));
   }
 
-  function inventoryShareUrl(id: string) {
-    return `${window.location.origin}${localHref("/inventory/")}?id=${encodeURIComponent(id)}`;
+  function inventoryShareUrl(id?: string, token?: string) {
+    const base = `${window.location.origin}${localHref("/inventory/")}`;
+    return token ? `${base}#${token}` : `${base}?id=${encodeURIComponent(id ?? "")}`;
   }
 
   async function saveInventory() {
@@ -584,8 +600,48 @@ export default function CatalogClient({
       setSavedInventory(snapshot);
       await loadInventoryHistory();
       setInventoryFeedback("Инвентаризация сохранена отдельным отчётом. Её можно скачать или отправить по ссылке.");
-    } catch (error) {
-      setInventoryFeedback(error instanceof Error ? error.message : "Не удалось сохранить инвентаризацию");
+    } catch {
+      const savedAt = new Date().toISOString();
+      const token = createInventoryShareToken({
+        v: 2,
+        s: supplier.slug,
+        d: savedAt,
+        i: inventoryItems.map((item) => [
+          item.productId,
+          item.barcode,
+          item.count,
+          item.defective ? 1 : 0,
+          item.defectPhotos,
+        ]),
+      });
+      const snapshot = {
+        token,
+        savedAt,
+        items: inventoryItems.map((item) => ({ ...item, defectPhotos: [...item.defectPhotos] })),
+      };
+      const localReport: InventoryHistoryItem = {
+        id: `local:${savedAt}`,
+        supplierSlug: supplier.slug,
+        savedAt,
+        positionCount: inventoryItems.length,
+        totalCount: inventoryItems.reduce((sum, item) => sum + item.count, 0),
+        defectiveCount: inventoryItems.filter((item) => item.defective).length,
+        token,
+      };
+      setSavedInventory(snapshot);
+      setInventoryHistory((current) => {
+        const next = [localReport, ...current.filter((item) => item.id !== localReport.id)].slice(0, 12);
+        try {
+          window.localStorage.setItem(
+            inventoryHistoryStorageKey(supplier.slug),
+            JSON.stringify(next.filter((item) => item.token)),
+          );
+        } catch {
+          // The current report still stays available until the page is closed.
+        }
+        return next;
+      });
+      setInventoryFeedback("Инвентаризация сохранена. Публичная ссылка содержит весь отчёт и фото — её можно отправить без входа в аккаунт.");
     } finally {
       setSavingInventory(false);
     }
@@ -593,7 +649,7 @@ export default function CatalogClient({
 
   async function copyInventoryLink() {
     if (!savedInventory) return;
-    const url = inventoryShareUrl(savedInventory.id);
+    const url = inventoryShareUrl(savedInventory.id, savedInventory.token);
     try {
       await navigator.clipboard.writeText(url);
       setInventoryFeedback("Ссылка скопирована — её можно отправить любому получателю");
@@ -608,8 +664,8 @@ export default function CatalogClient({
     }
   }
 
-  async function copyHistoryLink(id: string) {
-    const url = inventoryShareUrl(id);
+  async function copyHistoryLink(id: string, token?: string) {
+    const url = inventoryShareUrl(id, token);
     try {
       await navigator.clipboard.writeText(url);
       setInventoryFeedback("Ссылка на сохранённый отчёт скопирована");
@@ -1303,7 +1359,7 @@ export default function CatalogClient({
                     {exportingInventory ? "Готовим Excel…" : "Выгрузить в Excel"}
                   </button>
                   <a
-                    href={inventoryShareUrl(savedInventory.id)}
+                    href={inventoryShareUrl(savedInventory.id, savedInventory.token)}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -1373,8 +1429,8 @@ export default function CatalogClient({
                           <span>{report.positionCount} позиций · {report.totalCount} единиц · {report.defectiveCount} с браком</span>
                         </div>
                         <div>
-                          <a href={inventoryShareUrl(report.id)} target="_blank" rel="noreferrer">Открыть</a>
-                          <button type="button" onClick={() => copyHistoryLink(report.id)}>Копировать ссылку</button>
+                          <a href={inventoryShareUrl(report.id, report.token)} target="_blank" rel="noreferrer">Открыть</a>
+                          <button type="button" onClick={() => copyHistoryLink(report.id, report.token)}>Копировать ссылку</button>
                         </div>
                       </article>
                     ))}

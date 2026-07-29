@@ -94,13 +94,22 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
     const supplier = suppliers.find((item) => item.slug === supplierSlug);
     if (!supplier) return null;
 
-    const sourceItems = serverReport?.items ?? legacyPayload?.i.map(([productId, barcode, count]) => ({
-      productId,
-      barcode,
-      count,
-      defective: false,
-      photos: [],
-    })) ?? [];
+    const legacyItems = legacyPayload?.v === 2
+      ? legacyPayload.i.map(([productId, barcode, count, defective, photos]) => ({
+          productId,
+          barcode,
+          count,
+          defective: defective === 1,
+          photos,
+        }))
+      : legacyPayload?.i.map(([productId, barcode, count]) => ({
+          productId,
+          barcode,
+          count,
+          defective: false,
+          photos: [],
+        })) ?? [];
+    const sourceItems = serverReport?.items ?? legacyItems;
     const items = sourceItems.flatMap((entry) => {
       const product = supplier.products.find((item) => item.id === entry.productId);
       const size = product?.sizes.find((item) => item.barcode === entry.barcode);
