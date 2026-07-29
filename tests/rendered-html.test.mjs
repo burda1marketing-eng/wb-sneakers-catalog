@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(pathname = "/") {
@@ -22,7 +23,7 @@ async function render(pathname = "/") {
   );
 }
 
-test("renders the mobile-first catalog with visible sizes and barcodes", async () => {
+test("renders mobile catalog content, navigation and inventory entry point", async () => {
   const response = await render("/");
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -31,8 +32,10 @@ test("renders the mobile-first catalog with visible sizes and barcodes", async (
   assert.match(html, /Каталог обуви/);
   assert.match(html, /ИП Филиппов/);
   assert.match(html, /mobile-size-strip/);
-  assert.match(html, /штрихкод/i);
+  assert.match(html, /Размеры и штрихкоды/);
   assert.match(html, /Поиск по каталогу/);
+  assert.match(html, /Провести инвентаризацию/);
+  assert.match(html, /supplier-mobile-switcher/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/);
 });
 
@@ -50,4 +53,20 @@ test("renders a separate page for every supplier", async () => {
     assert.equal(response.status, 200, route);
     assert.match(await response.text(), new RegExp(marker), route);
   }
+});
+
+test("ships responsive navigation, compact details and camera inventory code", async () => {
+  const [component, styles] = await Promise.all([
+    readFile(new URL("../app/CatalogClient.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(component, /BrowserMultiFormatReader/);
+  assert.match(component, /Сканировать камерой/);
+  assert.match(component, /Штрихкод или название/);
+  assert.match(component, /Размер для инвентаризации/);
+  assert.doesNotMatch(component, /className="description"|className="modal-media"/);
+  assert.match(styles, /@media \(max-width: 900px\)/);
+  assert.match(styles, /supplier-mobile-switcher/);
+  assert.match(styles, /repeat\(auto-fill, minmax/);
 });
