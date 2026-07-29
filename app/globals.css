@@ -2081,7 +2081,9 @@ a {
 .inventory-picker-grid > button {
   display: grid;
   min-width: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 300px;
+  grid-template-rows: auto auto;
+  align-self: start;
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--line);
@@ -2380,6 +2382,7 @@ a {
   }
 
   .inventory-picker-grid > button {
+    min-height: 130px;
     grid-template-columns: minmax(120px, 0.42fr) minmax(0, 0.58fr);
     grid-template-rows: auto;
   }
