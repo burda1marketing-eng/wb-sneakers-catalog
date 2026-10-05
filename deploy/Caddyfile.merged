@@ -1,0 +1,61 @@
+# Caddyfile — polygraph-9.ru
+# Automatic HTTPS via Let's Encrypt.
+
+{
+  email admin@polygraph-9.ru
+  servers {
+    protocols h1 h2 h3
+  }
+}
+
+polygraph-9.ru, www.polygraph-9.ru {
+  encode zstd gzip
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "geolocation=(), camera=(), microphone=()"
+    -Server
+  }
+
+  @www host www.polygraph-9.ru
+  redir @www https://polygraph-9.ru{uri} permanent
+
+  # TinaCMS admin SPA — отдаётся как статика сайта (nginx)
+  handle /admin* {
+    reverse_proxy site:80
+  }
+
+  # TinaCMS backend — GraphQL + auth
+  handle /api/tina/* {
+    reverse_proxy tina-backend:4001
+  }
+
+  # Deploy webhook (GitHub push → site rebuild). HMAC-secured in the receiver.
+  handle /hooks/* {
+    reverse_proxy webhook:9000
+  }
+
+  # Lead-form API -> Node handler; everything else -> static site (nginx)
+  handle /api/* {
+    reverse_proxy lead:8080
+  }
+  handle {
+    reverse_proxy site:80
+  }
+}
+
+wb-inventory.213.165.41.106.nip.io {
+  encode zstd gzip
+
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(self), microphone=()"
+    -Server
+  }
+
+  reverse_proxy 172.18.0.1:8787
+}

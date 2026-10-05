@@ -11,6 +11,14 @@ export type InventoryShareItemV2 = [
   defective: 0 | 1,
   photos: string[],
 ];
+export type InventoryShareItemV3 = [
+  supplierSlug: string,
+  productId: string,
+  barcode: string,
+  count: number,
+  defective: 0 | 1,
+  photos: string[],
+];
 
 export type InventorySharePayloadV1 = {
   v: 1;
@@ -26,7 +34,14 @@ export type InventorySharePayloadV2 = {
   i: InventoryShareItemV2[];
 };
 
-export type InventorySharePayload = InventorySharePayloadV1 | InventorySharePayloadV2;
+export type InventorySharePayloadV3 = {
+  v: 3;
+  s: "all";
+  d: string;
+  i: InventoryShareItemV3[];
+};
+
+export type InventorySharePayload = InventorySharePayloadV1 | InventorySharePayloadV2 | InventorySharePayloadV3;
 
 export function createInventoryShareToken(payload: InventorySharePayload) {
   return compressToEncodedURIComponent(JSON.stringify(payload));
@@ -39,7 +54,7 @@ export function parseInventoryShareToken(token: string): InventorySharePayload |
 
     const payload = JSON.parse(json) as Partial<InventorySharePayload>;
     if (
-      (payload.v !== 1 && payload.v !== 2) ||
+      (payload.v !== 1 && payload.v !== 2 && payload.v !== 3) ||
       typeof payload.s !== "string" ||
       typeof payload.d !== "string" ||
       !Array.isArray(payload.i)
@@ -60,7 +75,8 @@ export function parseInventoryShareToken(token: string): InventorySharePayload |
       return { v: 1, s: payload.s, d: payload.d, i: items };
     }
 
-    const items = payload.i.filter(
+    if (payload.v === 2) {
+      const items = payload.i.filter(
       (item): item is InventoryShareItemV2 =>
         Array.isArray(item) &&
         item.length === 5 &&
@@ -72,8 +88,25 @@ export function parseInventoryShareToken(token: string): InventorySharePayload |
         Array.isArray(item[4]) &&
         item[4].length <= 10 &&
         item[4].every((photo) => typeof photo === "string" && photo.startsWith("data:image/")),
+      );
+      return { v: 2, s: payload.s, d: payload.d, i: items };
+    }
+
+    const items = payload.i.filter(
+      (item): item is InventoryShareItemV3 =>
+        Array.isArray(item) &&
+        item.length === 6 &&
+        typeof item[0] === "string" &&
+        typeof item[1] === "string" &&
+        typeof item[2] === "string" &&
+        Number.isInteger(item[3]) &&
+        item[3] > 0 &&
+        (item[4] === 0 || item[4] === 1) &&
+        Array.isArray(item[5]) &&
+        item[5].length <= 10 &&
+        item[5].every((photo) => typeof photo === "string" && photo.startsWith("data:image/")),
     );
-    return { v: 2, s: payload.s, d: payload.d, i: items };
+    return { v: 3, s: "all", d: payload.d, i: items };
   } catch {
     return null;
   }

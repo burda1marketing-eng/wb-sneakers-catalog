@@ -1,0 +1,12 @@
+wb-inventory.213.165.41.106.nip.io {
+  encode zstd gzip
+
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(self), microphone=()"
+    -Server
+  }
+
+  reverse_proxy 172.18.0.1:8787
+}

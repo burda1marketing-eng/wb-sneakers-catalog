@@ -11,6 +11,9 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "dist/**",
+    "work/**",
+    "data/workbook-inspect/**",
     "next-env.d.ts",
   ]),
 ]);

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { parseInventoryShareToken, type InventorySharePayload } from "./share";
+import { primarySizeLabel, sizeSecondaryLabel, type CatalogSize as Size } from "../size-format";
 
-type Size = { label: string; ru: string; barcode: string };
 type Product = {
   id: string;
   vendorCode: string;
@@ -29,6 +29,7 @@ type ServerReport = {
   totalCount: number;
   defectiveCount: number;
   items: Array<{
+    supplierSlug: string;
     productId: string;
     barcode: string;
     count: number;
@@ -90,12 +91,18 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
   }, []);
 
   const report = useMemo(() => {
-    const supplierSlug = serverReport?.supplierSlug ?? legacyPayload?.s;
-    const supplier = suppliers.find((item) => item.slug === supplierSlug);
-    if (!supplier) return null;
-
-    const legacyItems = legacyPayload?.v === 2
+    const legacyItems = legacyPayload?.v === 3
+      ? legacyPayload.i.map(([supplierSlug, productId, barcode, count, defective, photos]) => ({
+          supplierSlug,
+          productId,
+          barcode,
+          count,
+          defective: defective === 1,
+          photos,
+        }))
+      : legacyPayload?.v === 2
       ? legacyPayload.i.map(([productId, barcode, count, defective, photos]) => ({
+          supplierSlug: legacyPayload.s,
           productId,
           barcode,
           count,
@@ -103,6 +110,7 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
           photos,
         }))
       : legacyPayload?.i.map(([productId, barcode, count]) => ({
+          supplierSlug: legacyPayload.s,
           productId,
           barcode,
           count,
@@ -111,12 +119,14 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
         })) ?? [];
     const sourceItems = serverReport?.items ?? legacyItems;
     const items = sourceItems.flatMap((entry) => {
-      const product = supplier.products.find((item) => item.id === entry.productId);
+      const supplier = suppliers.find((item) => item.slug === entry.supplierSlug);
+      const product = supplier?.products.find((item) => item.id === entry.productId);
       const size = product?.sizes.find((item) => item.barcode === entry.barcode);
-      return product && size ? [{ product, size, ...entry }] : [];
+      return supplier && product && size ? [{ supplier, product, size, ...entry }] : [];
     });
+    const reportSuppliers = [...new Map(items.map((item) => [item.supplier.slug, item.supplier])).values()];
     return {
-      supplier,
+      suppliers: reportSuppliers,
       items,
       savedAt: serverReport?.savedAt ?? legacyPayload?.d ?? "",
     };
@@ -144,15 +154,12 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
   return (
     <main className="report-shell">
       <header className="report-header">
-        <a className="wordmark" href={localHref("/")} aria-label="Вернуться в каталог">
-          <span className="wordmark-mark">↗</span>
-          Каталог обуви
-        </a>
+        <a className="inventory-archive-link" href={localHref("/inventories/")}>← Все инвентаризации</a>
         <p className="eyebrow">Сохранённая инвентаризация</p>
         <h1>Остатки после инвентаризации</h1>
         <p className="report-supplier">
-          <strong>{report.supplier.legalName}</strong>
-          <span>{report.supplier.country} · {report.supplier.storeName}</span>
+          <strong>{report.suppliers.length === 1 ? report.suppliers[0].legalName : "Все кабинеты"}</strong>
+          <span>{report.suppliers.map((item) => `${item.country} · ${item.storeName}`).join(" · ")}</span>
         </p>
         <div className="report-summary" aria-label="Итоги инвентаризации">
           <span><strong>{report.items.length}</strong> позиций</span>
@@ -165,8 +172,8 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
 
       {report.items.length ? (
         <section className="report-list" aria-label="Остатки товаров">
-          {report.items.map(({ product, size, count, defective, photos }) => (
-            <article className={`report-item${defective ? " is-defective" : ""}`} key={`${product.id}:${size.barcode}`}>
+          {report.items.map(({ supplier, product, size, count, defective, photos }) => (
+            <article className={`report-item${defective ? " is-defective" : ""}`} key={`${supplier.slug}:${product.id}:${size.barcode}`}>
               <div className="report-image-wrap">
                 {product.photos[0] ? <img src={product.photos[0]} alt={`${product.title}, вид спереди`} /> : null}
               </div>
@@ -176,13 +183,14 @@ export default function InventoryReportClient({ suppliers }: { suppliers: Suppli
                 <div className="report-item-meta">
                   <span>WB {product.id}</span>
                   <span>Арт. {product.vendorCode}</span>
+                  <span>{supplier.legalName} · {supplier.storeName}</span>
                   {defective ? <strong>Брак</strong> : null}
                 </div>
               </div>
               <div className="report-size">
-                <small>Размер</small>
-                <strong>{size.label || "—"}</strong>
-                <span>RU {size.ru || "—"}</span>
+                <small>Размер производителя</small>
+                <strong>{primarySizeLabel(size)}</strong>
+                <span>{sizeSecondaryLabel(size)}</span>
               </div>
               <div className="report-barcode">
                 <small>Штрихкод</small>

@@ -21,6 +21,7 @@ export const inventoryItems = sqliteTable(
   {
     id: text("id").primaryKey(),
     inventoryId: text("inventory_id").notNull(),
+    supplierSlug: text("supplier_slug").notNull(),
     productId: text("product_id").notNull(),
     barcode: text("barcode").notNull(),
     count: integer("count").notNull(),

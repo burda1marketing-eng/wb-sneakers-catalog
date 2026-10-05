@@ -2,6 +2,7 @@ import catalog from "../../data/catalog.json";
 import { getSiteRuntimeEnv } from "../../../worker/runtime-env";
 
 type IncomingItem = {
+  supplierSlug?: unknown;
   productId?: unknown;
   barcode?: unknown;
   count?: unknown;
@@ -50,6 +51,7 @@ async function ensureSchema(db: D1Database) {
     db.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (
       id TEXT PRIMARY KEY NOT NULL,
       inventory_id TEXT NOT NULL,
+      supplier_slug TEXT NOT NULL,
       product_id TEXT NOT NULL,
       barcode TEXT NOT NULL,
       count INTEGER NOT NULL,
@@ -65,6 +67,10 @@ async function ensureSchema(db: D1Database) {
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS inventory_photos_item_idx ON inventory_photos (inventory_item_id)"),
   ]);
+  const columns = await db.prepare("PRAGMA table_info(inventory_items)").all<{ name: string }>();
+  if (!columns.results.some((column) => column.name === "supplier_slug")) {
+    await db.prepare("ALTER TABLE inventory_items ADD COLUMN supplier_slug TEXT NOT NULL DEFAULT 'all'").run();
+  }
 }
 
 function decodePhoto(dataUrl: string) {
@@ -102,7 +108,7 @@ export async function GET(request: Request) {
     if (!inventory) return json(request, { error: "Инвентаризация не найдена" }, 404);
 
     const itemRows = await bindings.DB.prepare(
-      "SELECT id, product_id, barcode, count, defective, position FROM inventory_items WHERE inventory_id = ? ORDER BY position",
+      "SELECT id, supplier_slug, product_id, barcode, count, defective, position FROM inventory_items WHERE inventory_id = ? ORDER BY position",
     ).bind(id).all<Record<string, string | number>>();
     const photoRows = await bindings.DB.prepare(
       "SELECT inventory_item_id, object_key, position FROM inventory_photos WHERE inventory_item_id IN (SELECT id FROM inventory_items WHERE inventory_id = ?) ORDER BY position",
@@ -124,6 +130,7 @@ export async function GET(request: Request) {
       totalCount: Number(inventory.total_count),
       defectiveCount: Number(inventory.defective_count),
       items: itemRows.results.map((item) => ({
+        supplierSlug: String(item.supplier_slug),
         productId: String(item.product_id),
         barcode: String(item.barcode),
         count: Number(item.count),
@@ -174,6 +181,7 @@ export async function POST(request: Request) {
   }
 
   const normalized = (body.items as IncomingItem[]).map((item) => {
+    const itemSupplierSlug = typeof item.supplierSlug === "string" ? item.supplierSlug.slice(0, 100) : supplierSlug;
     const productId = typeof item.productId === "string" ? item.productId : "";
     const barcode = typeof item.barcode === "string" ? item.barcode : "";
     const count = Number(item.count);
@@ -181,9 +189,9 @@ export async function POST(request: Request) {
     const photos = Array.isArray(item.photos)
       ? item.photos.filter((photo): photo is string => typeof photo === "string").slice(0, 10)
       : [];
-    return { productId, barcode, count, defective, photos };
+    return { supplierSlug: itemSupplierSlug, productId, barcode, count, defective, photos };
   });
-  if (normalized.some((item) => !Number.isInteger(item.count) || item.count < 1 || item.count > 9999 || !findCatalogItem(supplierSlug, item.productId, item.barcode))) {
+  if (normalized.some((item) => !Number.isInteger(item.count) || item.count < 1 || item.count > 9999 || !findCatalogItem(item.supplierSlug, item.productId, item.barcode))) {
     return json(request, { error: "В отчёте есть неизвестная модель, размер или количество" }, 400);
   }
 
@@ -207,8 +215,8 @@ export async function POST(request: Request) {
     const item = normalized[itemIndex];
     const itemId = crypto.randomUUID();
     statements.push(bindings.DB.prepare(
-      "INSERT INTO inventory_items (id, inventory_id, product_id, barcode, count, defective, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).bind(itemId, id, item.productId, item.barcode, item.count, item.defective ? 1 : 0, itemIndex));
+      "INSERT INTO inventory_items (id, inventory_id, supplier_slug, product_id, barcode, count, defective, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(itemId, id, item.supplierSlug, item.productId, item.barcode, item.count, item.defective ? 1 : 0, itemIndex));
 
     for (let photoIndex = 0; photoIndex < decodedPhotos[itemIndex].length; photoIndex += 1) {
       const photo = decodedPhotos[itemIndex][photoIndex]!;

@@ -1,0 +1,25 @@
+[Unit]
+Description=WB Inventory Catalog
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/wb-inventory/current
+# Listen only on the Docker bridge used by the host's existing Caddy proxy.
+Environment=HOST=172.18.0.1
+Environment=PORT=8787
+Environment=PUBLIC_DIR=/opt/wb-inventory/current/public
+Environment=CATALOG_PATH=/opt/wb-inventory/current/catalog.json
+Environment=DATA_DIR=/var/lib/wb-inventory
+ExecStart=/usr/bin/python3 /opt/wb-inventory/current/server/vps-server.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/wb-inventory
+
+[Install]
+WantedBy=multi-user.target
